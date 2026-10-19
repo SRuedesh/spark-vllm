@@ -51,7 +51,7 @@ VLLM_PORT="${VLLM_PORT:-8000}"
 CONTAINER_NAME="${CONTAINER_NAME:-qwen38-flash-vllm}"
 
 # Do not inherit a generic VLLM_IMAGE override from older Qwen launchers.
-# Qwen3.8-Flash-Next needs the dedicated preview image plus the Spark PLE patch.
+# Qwen3.8-Flash-Next needs model support plus the Spark PLE patch.
 # Override this deployment only with QWEN38_VLLM_IMAGE if necessary.
 if [ -n "${VLLM_IMAGE:-}" ] && [ "${VLLM_IMAGE}" != "qwen38-flash-dgx" ]; then
   echo "WARNING: Ignoring legacy VLLM_IMAGE='$VLLM_IMAGE'."
@@ -477,9 +477,8 @@ prepare_recipe() {
 
 verify_image_support() {
   echo "Checking Qwen3.8-Flash-Next support inside $VLLM_IMAGE..."
-  # The dedicated vLLM preview carries model support in vLLM itself.  Its
-  # Transformers package does not have to expose qwen4_exp through the global
-  # CONFIG_MAPPING, so testing CONFIG_MAPPING gives a false negative.
+  # Check vLLM directly. The recipe now uses qwen4_exp, while older preview
+  # images use qwen3_8_flash_next. Transformers CONFIG_MAPPING is not required.
   if ! docker run --rm --entrypoint python3 "$VLLM_IMAGE" -c '
 import importlib.util
 import vllm
@@ -487,16 +486,26 @@ from vllm.model_executor.models.registry import ModelRegistry
 arch = "Qwen4ExpForConditionalGeneration"
 archs = ModelRegistry.get_supported_archs()
 assert arch in archs, f"{arch} is missing from the vLLM model registry"
-assert importlib.util.find_spec("vllm.models.qwen3_8_flash_next") is not None, (
-    "vllm.models.qwen3_8_flash_next package is missing"
-)
+packages = ("vllm.models.qwen4_exp", "vllm.models.qwen3_8_flash_next")
+model_package = None
+for package in packages:
+    try:
+        spec = importlib.util.find_spec(package)
+    except ModuleNotFoundError as exc:
+        if exc.name != package and not package.startswith(f"{exc.name}."):
+            raise
+        continue
+    if spec is not None:
+        model_package = package
+        break
+assert model_package is not None, f"Qwen model package is missing: {packages}"
 print("vLLM", vllm.__version__)
 print(arch, "registry: OK")
-print("Qwen3.8-Flash-Next model package: OK")
+print(model_package, "model package: OK")
 ' ; then
-    echo "ERROR: $VLLM_IMAGE is not the Qwen3.8-Flash-Next preview build."
-    echo "The launcher must build it from the current single-Spark recipe, whose"
-    echo "Dockerfile is based on vllm/vllm-openai:qwen38-flash-next."
+    echo "ERROR: Qwen3.8-Flash-Next support check failed for $VLLM_IMAGE."
+    echo "See the Python error above. The image needs the registered model and"
+    echo "its model package. Rebuild from the selected single-Spark recipe."
     echo "Try: REBUILD_VLLM_IMAGE=1 $0"
     exit 1
   fi
