@@ -102,7 +102,9 @@ TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-qwen3_coder}"
 
 # Qwen3.8-Flash-Next thinks by default. Keep the previous launcher's behavior
 # and disable thinking globally unless a request overrides it.
-DEFAULT_CHAT_TEMPLATE_KWARGS="${DEFAULT_CHAT_TEMPLATE_KWARGS:-{\"enable_thinking\":false}}"
+if [ -z "${DEFAULT_CHAT_TEMPLATE_KWARGS:-}" ]; then
+  DEFAULT_CHAT_TEMPLATE_KWARGS='{"enable_thinking":false}'
+fi
 
 PROXY_PID_FILE="$WORKDIR/proxy.pid"
 PROXY_LOG_FILE="$WORKDIR/proxy.log"
